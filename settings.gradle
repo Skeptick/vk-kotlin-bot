@@ -1,0 +1,3 @@
+rootProject.name = 'vkbot'
+include 'vk-kotlin-bot'
+include 'app'
