@@ -17,5 +17,3 @@ fun String.equalsLeastOne(vararg suffix: String): Boolean {
     suffix.forEach { if (equals(it, true)) return true }
     return false
 }
-
-fun chatIdToPeerId(chatId: Int) = chatId + 2000000000

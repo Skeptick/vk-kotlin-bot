@@ -1,10 +1,8 @@
 package routes
 
-import chatIdToPeerId
 import kotlinx.coroutines.experimental.delay
 import tk.skeptick.bot.ApplicationContext
 import tk.skeptick.bot.Chat
-import tk.skeptick.bot.Message
 import tk.skeptick.bot.TypedMessageRoute
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -29,8 +27,8 @@ fun TypedMessageRoute<Chat>.quiz() {
 
         onMessage("стоп") {
             intercept {
-                val chatId = it.message.chatId
-                val quiz = quizzes[chatId]
+                val peerId = it.message.peerId
+                val quiz = quizzes[peerId]
                 if (quiz == null || !quiz.isActive) {
                     it.message.respondWithForward("В вашем чате не запущена викторина.")
                 } else {
@@ -42,80 +40,85 @@ fun TypedMessageRoute<Chat>.quiz() {
         }
 
         intercept {
-            val chatId = it.message.chatId
-            val quiz = quizzes[chatId]
+            val peerId = it.message.peerId
+            val quiz = quizzes[peerId]
             if (quiz != null && quiz.isActive) {
                 val (question, answer, lettersOpenNum, alreadyAnswered) = quiz
                 if (alreadyAnswered) {
-                    val response = StringBuilder()
-                    response.append("В этом чате уже запущена викторина.\n")
-                    response.append("Подождите, скоро будет новый вопрос.")
+                    val response = with(StringBuilder()) {
+                        append("В этом чате уже запущена викторина.\n")
+                        append("Подождите, скоро будет новый вопрос.")
+                    }
+
                     it.message.respondWithForward(response)
                 } else {
                     val hint = makeHint(answer, lettersOpenNum)
-                    val response = StringBuilder()
-                    response.append("В этом чате уже запущена викторина.\n")
-                    response.append("Текущий вопрос: $question\n")
-                    response.append("Текущая подсказка: $hint")
+                    val response = with(StringBuilder()) {
+                        append("В этом чате уже запущена викторина.\n")
+                        append("Текущий вопрос: $question\n")
+                        append("Текущая подсказка: $hint")
+                    }
+
                     it.message.respondWithForward(response)
                 }
-            } else sendNewQuiz(chatId)
+            } else sendNewQuiz(peerId)
         }
 
     }
 
 }
 
-private suspend fun ApplicationContext.sendNewQuiz(chatId: Int) {
-    val oldQuiz = quizzes[chatId]
+private suspend fun ApplicationContext.sendNewQuiz(peerId: Int) {
+    val oldQuiz = quizzes[peerId]
     if (oldQuiz != null && oldQuiz.isActive && !oldQuiz.alreadyAnswered) return
 
     val newQuiz = makeQuiz()
-    val messageId = respond(chatIdToPeerId(chatId), newQuiz.question) ?: return
-    val message = api.getMessagesById(messageId)?.first() ?: return
+    val messageId = respond(peerId, newQuiz.question) ?: return
 
-    quizzes.put(chatId, newQuiz)
-    sendQuizHint(newQuiz, message)
+    quizzes.put(peerId, newQuiz)
+    sendQuizHint(peerId, messageId, newQuiz)
 }
 
-private suspend fun ApplicationContext.sendQuizHint(quiz: Quiz, message: Message) {
-    val maxTry = 5
-    var currentTry = 0
-    while (currentTry < maxTry) {
+private suspend fun ApplicationContext.sendQuizHint(peerId: Int, questionMessageId: Int, quiz: Quiz) {
+    val maxHint = 5
+    var currentHint = 0
+    while (currentHint < maxHint) {
         delay(30, TimeUnit.SECONDS)
         if (quiz.alreadyAnswered || !quiz.isActive) return
 
-        if (currentTry < 4 && quiz.answer.lastIndex > currentTry) {
+        if (currentHint < maxHint - 1 && quiz.answer.lastIndex > currentHint) {
             quiz.lettersOpenNum += 1
             val hint = makeHint(quiz.answer, quiz.lettersOpenNum)
-            message.respondWithForward("Подсказка: $hint")
+            respond(peerId, "Подсказка: $hint", questionMessageId)
         } else {
-            val response = StringBuilder()
-            response.append("Никто не дал правильного ответа.\n")
-            response.append("Правильный ответ: ${quiz.answer}")
-            message.respondWithForward(response)
+            val response = with(StringBuilder()) {
+                append("Никто не дал правильного ответа.\n")
+                append("Правильный ответ: ${quiz.answer}")
+            }
+
+            respond(peerId, response, questionMessageId)
             quiz.alreadyAnswered = true
             break
         }
 
-        currentTry++
+        currentHint++
     }
 
     delay(5, TimeUnit.SECONDS)
-    if (quiz.isActive) sendNewQuiz(message.chatId!!)
+    if (quiz.isActive) sendNewQuiz(peerId)
 }
 
 suspend fun ApplicationContext.interceptQuizAnswer(message: Chat) {
     if (!quizzes.containsKey(message.chatId)) return
 
-    val quiz = quizzes[message.chatId] ?: return
+    val quiz = quizzes[message.peerId] ?: return
     if (quiz.isActive && !quiz.alreadyAnswered) {
         if (message.text.startsWith(quiz.answer, true)) {
             quiz.alreadyAnswered = true
             message.respondWithForward("Поздравляю! Вы правы!")
 
             delay(5, TimeUnit.SECONDS)
-            if (quiz.isActive) sendNewQuiz(message.chatId)
+            if (quiz.isActive) sendNewQuiz(message.peerId)
         }
     }
 }

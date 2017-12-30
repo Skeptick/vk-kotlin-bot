@@ -91,7 +91,6 @@ private suspend fun ApplicationContext.getStatisticsForAll(
     }
 
     val result = StringBuilder()
-
     val dayBefore = firstMessageDate.round().diffInDays(now) + 1
     result.append("Статистика за $dayBefore ${getDeclensionDays(dayBefore)}.\n\n")
     result.append("Кол-во сообщений / символов:\n")
@@ -159,49 +158,55 @@ private suspend fun ApplicationContext.getStatisticsForUser(
     else if (messagesByDate.isEmpty())
         return "Нет статистики для этого пользователя за указанный период."
 
-    val lastMessageDate = MessagesHistory.getLastMessageForUserByChatAndUserId(chatId, user.id)
+    val lastMessageDate = MessagesHistory
+            .getLastMessageForUserByChatAndUserId(chatId, user.id)
             ?: return null
 
-    val result = StringBuilder()
     val correctUsername = user.firstName + ' ' + user.lastName
     val dayBefore = messagesByDate.first().first.diffInDays(now) + 1
-    result.append("Статистика пользователя $correctUsername (id${user.id}) ")
-    result.append("за $dayBefore ${getDeclensionDays(dayBefore)}.\n")
-    result.append("Последнее сообщение: ${now.diffInString(lastMessageDate)} назад.\n\n")
+    val result = with(StringBuilder()) {
+        append("Статистика пользователя $correctUsername (id${user.id}) ")
+        append("за $dayBefore ${getDeclensionDays(dayBefore)}.\n")
+        append("Последнее сообщение: ${now.diffInString(lastMessageDate)} назад.\n\n")
+        append("Кол-во сообщений / символов:\n")
+    }
 
-    result.append("Кол-во сообщений / символов:\n")
+    fun addDateCounter(pair: Pair<DateTime, UserStat>) = with(result) {
+        append("${pair.first.dateString()} — ")
+        result.append("${pair.second.messageCount} / ")
+        result.append("${pair.second.charCount}\n")
+    }
+
+    fun addEmptyCounter(date: DateTime) =
+            result.append("${date.dateString()} — 0 / 0\n")
 
     var prevDay: DateTime? = null
     messagesByDate.forEach {
         if (prevDay == null || it.first.diffInDays(prevDay!!) == 1) {
             prevDay = it.first
-            result.append("${it.first.dateString()} — ")
-            result.append("${it.second.messageCount} / ")
-            result.append("${it.second.charCount}\n")
+            addDateCounter(it)
         } else {
             while (prevDay != it.first) {
                 prevDay = prevDay?.plusDays(1)
-                if (prevDay == it.first) {
-                    result.append("${it.first.dateString()} — ")
-                    result.append("${it.second.messageCount} / ")
-                    result.append("${it.second.charCount}\n")
-                } else {
-                    result.append("${prevDay?.dateString()} — 0 / 0\n")
-                }
+                if (prevDay == it.first) addDateCounter(it)
+                else addEmptyCounter(prevDay!!)
             }
         }
     }
 
     while (prevDay != roundNow) {
         prevDay = prevDay?.plusDays(1)
-        result.append("${prevDay?.dateString()} — 0 / 0\n")
+        addEmptyCounter(prevDay!!)
     }
 
     val allMessages = messagesByDate.sumBy { it.second.messageCount }
     val allChars = messagesByDate.sumBy { it.second.charCount }
     if (days == null) result.append("\nЗа всё время: $allMessages / $allChars\n")
-    else result.append("\nВсего за $dayBefore ")
-            .append("${getDeclensionDays(dayBefore)}: $allMessages / $allChars\n")
+    else with(result) {
+        append("\nВсего за $dayBefore ")
+        append("${getDeclensionDays(dayBefore)}: ")
+        append("$allMessages / $allChars\n")
+    }
 
     return result.toString()
 }
