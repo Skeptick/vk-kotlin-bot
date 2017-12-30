@@ -3,3 +3,4 @@ logs
 .gradle
 .idea
 out
+/app/src/main/resources/*.properties
