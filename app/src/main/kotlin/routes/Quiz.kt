@@ -109,7 +109,7 @@ private suspend fun ApplicationContext.sendQuizHint(peerId: Int, questionMessage
 }
 
 suspend fun ApplicationContext.interceptQuizAnswer(message: Chat) {
-    if (!quizzes.containsKey(message.chatId)) return
+    if (!quizzes.containsKey(message.peerId)) return
 
     val quiz = quizzes[message.peerId] ?: return
     if (quiz.isActive && !quiz.alreadyAnswered) {
