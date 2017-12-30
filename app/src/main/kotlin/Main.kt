@@ -1,14 +1,11 @@
+import dao.*
+import routes.*
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
-import dao.MessagesHistory
-import dao.Settings
-import dao.getPts
-import dao.savePts
 import kotlinx.coroutines.experimental.runBlocking
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
-import routes.*
 import tk.skeptick.bot.BotApplication
 import tk.skeptick.bot.Chat
 import tk.skeptick.bot.DefaultMessageRoute

@@ -8,7 +8,7 @@ import tk.skeptick.bot.ApplicationContext
 import tk.skeptick.bot.Chat
 import tk.skeptick.bot.Message
 import tk.skeptick.bot.TypedMessageRoute
-import kotlin.math.roundToInt
+import kotlin.math.absoluteValue
 
 fun TypedMessageRoute<Chat>.statistics() {
 
@@ -72,8 +72,7 @@ private suspend fun ApplicationContext.getStatisticsForAll(
     if (days != null && days == 0) return "Количество дней должно быть больше нуля."
 
     val now = DateTime.now()
-    val minDate = days?.let { now.minusDays(it)
-            .let { DateTime(it.year, it.monthOfYear, it.dayOfMonth, 0, 0) } }
+    val minDate = days?.let { now.minusDays(it - 1).round() }
 
     val chatId = message.chatId
     val users = api.getChatUsers(chatId) ?: return null
@@ -93,25 +92,30 @@ private suspend fun ApplicationContext.getStatisticsForAll(
     }
 
     val result = StringBuilder()
-    val daysCount = now.diffInDaysRound(firstMessageDate)
-    result.append("Статистика за $daysCount ${getDeclensionDays(daysCount)}.\n\n")
+
+    val dayBefore = firstMessageDate.round().diffInDays(now) + 1
+    if (dayBefore == 0)
+        result.append("Статистика за сегодня.\n\n")
+    else
+        result.append("Статистика за $dayBefore ${getDeclensionDays(dayBefore)}.\n\n")
+
     result.append("Кол-во сообщений / символов:\n")
 
     presentUsersCounter
-            .sortedByDescending { it.second.messagesCount }
+            .sortedByDescending { it.second.messageCount }
             .forEachIndexed { i, pair ->
                 result.append("${i + 1}. ${pair.first}")
                 result.append(" — ")
-                result.append("${pair.second.messagesCount} / ")
+                result.append("${pair.second.messageCount} / ")
                 result.append("${pair.second.charCount}\n") }
 
     if (days == null) {
         val lastMessagesForUsers = MessagesHistory.getLastMessagesForUsersByChat(chatId)
-        val presentUsersMessageDate = users
-                .mapNotNull { user ->
-                    lastMessagesForUsers[user.id]?.let { (user.firstName + ' ' + user.lastName) to it } }
-                .filter { now.diffInDays(it.second) > 0 }
-                .sortedBy { it.second }
+        val presentUsersMessageDate = users.mapNotNull { user ->
+            lastMessagesForUsers[user.id]?.let {
+                (user.firstName + ' ' + user.lastName) to it
+            }
+        }.filter { now.diffInDays(it.second) > 0 }.sortedBy { it.second }
 
         if (presentUsersMessageDate.isNotEmpty()) {
             result.append('\n')
@@ -143,47 +147,66 @@ private suspend fun ApplicationContext.getStatisticsForUser(
 
     if (days != null && days == 0) return "Количество дней должно быть больше нуля."
 
-    val now = org.joda.time.DateTime.now()
-    val minDate = days?.let { now.minusDays(it - 1)
-            .let { DateTime(it.year, it.monthOfYear, it.dayOfMonth, 0, 0) } }
+    val now = DateTime.now()
+    val roundNow = now.round()
+    val minDate = days?.let { now.minusDays(it - 1).round() }
 
     val users = api.getChatUsers(message.chatId) ?: return null
     val user = users.find { (it.firstName + ' ' + it.lastName).equals(username, true) }
             ?: return "Не удалось найти указанного пользователя."
 
-    val username = user.firstName + ' ' + user.lastName
     val userMessages = MessagesHistory.getUserMessages(message.chatId, user.id, minDate)
-    if (userMessages.isEmpty()) return "Ещё нет статистики для указанного пользователя"
+
+    if (userMessages.isEmpty() && days == null)
+        return "Ещё нет статистики для указанного пользователя."
+    else if (userMessages.isEmpty())
+        return "Нет статистики для этого пользователя за указанный период."
+
+    val messagesByDate = userMessages
+            .groupBy { it.date.round() }.toList()
+            .map { it.first to UserStat(it.second.size, it.second.sumBy { it.charCount }) }
+            .takeLast(30)
 
     val result = StringBuilder()
-    result.append("Статистика пользователя $username (id${user.id}).\n")
-    result.append("Последнее сообщение: ${now.diffInString(userMessages.last().date)} назад\n\n")
-
-    val messagesByDays = userMessages
-            .groupBy { it.date.datestamp() }.toList()
-            .mapIndexed { i, pair ->
-                i to UserStat(pair.second.size, pair.second.sumBy { it.charCount }) }
+    val correctUsername = user.firstName + ' ' + user.lastName
+    val dayBefore = messagesByDate.first().first.diffInDays(now) + 1
+    result.append("Статистика пользователя $correctUsername (id${user.id}) ")
+    result.append("за $dayBefore ${getDeclensionDays(dayBefore)}.\n")
+    result.append("Последнее сообщение: ${now.diffInString(userMessages.last().date)} назад.\n\n")
 
     result.append("Кол-во сообщений / символов:\n")
+
+    var prevDay: DateTime? = null
+    messagesByDate.forEach {
+        if (prevDay == null || it.first.diffInDays(prevDay!!) == 1) {
+            prevDay = it.first
+            result.append("${it.first.dateString()} — ")
+            result.append("${it.second.messageCount} / ")
+            result.append("${it.second.charCount}\n")
+        } else {
+            while (prevDay != it.first) {
+                prevDay = prevDay!!.plusDays(1)
+                if (prevDay == it.first) {
+                    result.append("${it.first.dateString()} — ")
+                    result.append("${it.second.messageCount} / ")
+                    result.append("${it.second.charCount}\n")
+                } else {
+                    result.append("${prevDay?.dateString()} — 0 / 0\n")
+                }
+            }
+        }
+    }
+
+    while (prevDay != roundNow) {
+        prevDay = prevDay!!.plusDays(1)
+        result.append("${prevDay?.dateString()} — 0 / 0\n")
+    }
+
     val allMessages = userMessages.size
     val allChars = userMessages.sumBy { it.charCount }
-
-    if (days == null)
-        result.append("За всё время: $allMessages / $allChars\n")
-
-    if (days != null)
-        result.append("За ${messagesByDays.size} ${getDeclensionDays(messagesByDays.size)}: ")
-                .append("$allMessages / $allChars\n")
-
-    var days = messagesByDays.size
-    while (days > 1) {
-        if (days > 5) days /= 2
-        else days -= 1
-
-        val messages = messagesByDays.takeLast(days).sumBy { it.second.messagesCount }
-        val chars = messagesByDays.takeLast(days).sumBy { it.second.charCount }
-        result.append("За $days ${getDeclensionDays(days)}: $messages / $chars\n")
-    }
+    if (days == null) result.append("\nЗа всё время: $allMessages / $allChars\n")
+    else result.append("\nВсего за $dayBefore ")
+            .append("${getDeclensionDays(dayBefore)}: $allMessages / $allChars\n")
 
     return result.toString()
 }
@@ -215,11 +238,14 @@ private fun getDeclensionDays(num: Int): String {
     }
 }
 
-private fun DateTime.diffInDaysRound(other: DateTime): Int =
-        ((millis - other.millis).toDouble() / 1000 / 60 / 60 / 24).roundToInt()
+private fun DateTime.round(): DateTime =
+        withTime(0, 0, 0, 0)
+
+private fun DateTime.dateString(): String =
+        "$dayOfMonth.$monthOfYear.$year"
 
 private fun DateTime.diffInDays(other: DateTime): Int =
-        ((millis - other.millis).toDouble() / 1000 / 60 / 60 / 24).toInt()
+        ((millis - other.millis).toDouble() / 1000 / 60 / 60 / 24).toInt().absoluteValue
 
 private fun DateTime.diffInString(other: DateTime): String {
     val result = StringBuilder()
@@ -228,8 +254,4 @@ private fun DateTime.diffInString(other: DateTime): String {
     result.append("${(minutes / 60) % 24} ч. ")
     result.append("${minutes % 60} мин.")
     return result.toString()
-}
-
-private fun DateTime.datestamp(): Int {
-    return year * 10000 + monthOfYear * 100 + dayOfMonth
 }

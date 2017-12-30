@@ -6,7 +6,7 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import org.joda.time.DateTime
 import tk.skeptick.bot.Message
 
-data class UserStat(val messagesCount: Int, val charCount: Int)
+data class UserStat(val messageCount: Int, val charCount: Int)
 
 data class HistoryMessage(
         val messageId: Int,
@@ -67,7 +67,7 @@ fun MessagesHistory.getMessagesCountForUsersByChat(chatId: Int, datetime: DateTi
                     .groupBy(MessagesHistory.userId)
                     .associate {
                         it[MessagesHistory.userId] to UserStat(
-                                messagesCount = it[MessagesHistory.userId.count()],
+                                messageCount = it[MessagesHistory.userId.count()],
                                 charCount = it[MessagesHistory.text.charLengthSum()])
                     }
         } else {
@@ -76,7 +76,7 @@ fun MessagesHistory.getMessagesCountForUsersByChat(chatId: Int, datetime: DateTi
                     .groupBy(MessagesHistory.userId)
                     .associate {
                         it[MessagesHistory.userId] to UserStat(
-                                messagesCount = it[MessagesHistory.userId.count()],
+                                messageCount = it[MessagesHistory.userId.count()],
                                 charCount = it[MessagesHistory.text.charLengthSum()])
                     }
         }
