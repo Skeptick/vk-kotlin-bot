@@ -18,4 +18,4 @@ fun String.equalsLeastOne(vararg suffix: String): Boolean {
     return false
 }
 
-fun chatIdtoPeerId(chatId: Int) = chatId + 2000000000
+fun chatIdToPeerId(chatId: Int) = chatId + 2000000000

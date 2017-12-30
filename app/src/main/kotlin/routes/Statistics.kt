@@ -73,8 +73,7 @@ private suspend fun ApplicationContext.getStatisticsForAll(
 
     val now = DateTime.now()
     val minDate = days?.let { now.minusDays(it)
-            .let { DateTime(it.year, it.monthOfYear, it.dayOfMonth, 0, 0) }
-    }
+            .let { DateTime(it.year, it.monthOfYear, it.dayOfMonth, 0, 0) } }
 
     val chatId = message.chatId
     val users = api.getChatUsers(chatId) ?: return null
@@ -83,7 +82,8 @@ private suspend fun ApplicationContext.getStatisticsForAll(
 
     val presentUsersCounter = users.mapNotNull { user ->
         countMessagesForUsers[user.id]?.let {
-            (user.firstName + ' ' + user.lastName) to it }
+            (user.firstName + ' ' + user.lastName) to it
+        }
     }
 
     val absentUsers = users.mapNotNull { user ->
@@ -119,7 +119,8 @@ private suspend fun ApplicationContext.getStatisticsForAll(
             presentUsersMessageDate.forEachIndexed { i, pair ->
                 result.append(pair.first)
                 result.append(" — ")
-                result.append("${now.diffInString(pair.second)}\n") }
+                result.append("${now.diffInString(pair.second)}\n")
+            }
         }
     }
 
@@ -127,7 +128,8 @@ private suspend fun ApplicationContext.getStatisticsForAll(
         result.append('\n')
         result.append("Нет данных за указанный период:\n")
         absentUsers.sortedBy { it }
-                .forEach { result.append("$it\n") }
+                .joinToString("\n")
+                .let(result::append)
     }
 
     return result.toString()
@@ -170,18 +172,17 @@ private suspend fun ApplicationContext.getStatisticsForUser(
         result.append("За всё время: $allMessages / $allChars\n")
 
     if (days != null)
-        result.append("За ${messagesByDays.size} ${getDeclensionDays(messagesByDays.size)}: " +
-                "$allMessages / $allChars\n")
+        result.append("За ${messagesByDays.size} ${getDeclensionDays(messagesByDays.size)}: ")
+                .append("$allMessages / $allChars\n")
 
     var days = messagesByDays.size
-    while (days > 0) {
+    while (days > 1) {
         if (days > 5) days /= 2
         else days -= 1
-        if (days != 0) {
-            val messages = messagesByDays.takeLast(days).sumBy { it.second.messagesCount }
-            val chars = messagesByDays.takeLast(days).sumBy { it.second.charCount }
-            result.append("За $days ${getDeclensionDays(days)}: $messages / $chars\n")
-        }
+
+        val messages = messagesByDays.takeLast(days).sumBy { it.second.messagesCount }
+        val chars = messagesByDays.takeLast(days).sumBy { it.second.charCount }
+        result.append("За $days ${getDeclensionDays(days)}: $messages / $chars\n")
     }
 
     return result.toString()

@@ -6,7 +6,11 @@ import tk.skeptick.bot.TypedMessageRoute
 fun TypedMessageRoute<Chat>.about() {
     onMessage("о себе", "инфо") {
         intercept {
-            it.message.respondWithForward("Ты не робот, а я - да.")
+            val response = StringBuilder()
+            response.append("Ты не робот, а я - да.\n\n")
+            response.append("Исходный код бот и библиотека для создания своего на языке Kotlin:")
+            response.append("https://github.com/Skeptick/vk-kotlin-bot")
+            it.message.respondWithForward(response)
         }
     }
 }

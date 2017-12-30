@@ -1,6 +1,6 @@
 package routes
 
-import chatIdtoPeerId
+import chatIdToPeerId
 import kotlinx.coroutines.experimental.delay
 import tk.skeptick.bot.ApplicationContext
 import tk.skeptick.bot.Chat
@@ -71,7 +71,7 @@ private suspend fun ApplicationContext.sendNewQuiz(chatId: Int) {
     if (oldQuiz != null && oldQuiz.isActive && !oldQuiz.alreadyAnswered) return
 
     val newQuiz = makeQuiz()
-    val messageId = respond(chatIdtoPeerId(chatId), newQuiz.question) ?: return
+    val messageId = respond(chatIdToPeerId(chatId), newQuiz.question) ?: return
     val message = api.getMessagesById(messageId)?.first() ?: return
 
     quizzes.put(chatId, newQuiz)
