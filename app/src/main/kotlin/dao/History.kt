@@ -58,12 +58,16 @@ fun MessagesHistory.addAll(messages: List<Message>) {
     }
 }
 
-fun MessagesHistory.getMessagesCountForUsersByChat(chatId: Int, datetime: DateTime? = null): Map<Int, UserStat> {
+fun MessagesHistory.getMessagesCountForUsersByChat(
+        chatId: Int,
+        datetime: DateTime? = null
+): Map<Int, UserStat> {
+
     return transaction {
         if (datetime != null) {
             slice(MessagesHistory.userId, MessagesHistory.userId.count(), MessagesHistory.text.charLengthSum())
-                    .select { (MessagesHistory.chatId eq chatId) and
-                            (MessagesHistory.date greaterEq datetime) }
+                    .select { (MessagesHistory.date greaterEq datetime) and
+                            (MessagesHistory.chatId eq chatId) }
                     .groupBy(MessagesHistory.userId)
                     .associate {
                         it[MessagesHistory.userId] to UserStat(
@@ -83,23 +87,116 @@ fun MessagesHistory.getMessagesCountForUsersByChat(chatId: Int, datetime: DateTi
     }
 }
 
-fun MessagesHistory.getLastMessagesForUsersByChat(chatId: Int, datetime: DateTime? = null): Map<Int, DateTime?> {
+fun MessagesHistory.getMessagesCountForUserByChatAndUserId(
+        chatId: Int,
+        userId: Int,
+        datetime: DateTime? = null
+): Map<DateTime, UserStat> {
     return transaction {
         if (datetime != null) {
-            slice(MessagesHistory.userId, MessagesHistory.date.max())
-                    .select { (MessagesHistory.date greaterEq datetime) and (MessagesHistory.chatId eq chatId) }
-                    .groupBy(MessagesHistory.userId)
-                    .associate { it[MessagesHistory.userId] to it[MessagesHistory.date.max()] }
+            slice(MessagesHistory.date.date(), MessagesHistory.messageId.count(), MessagesHistory.text.charLengthSum())
+                    .select { (MessagesHistory.date greaterEq datetime) and
+                            (MessagesHistory.userId eq userId) and
+                            (MessagesHistory.chatId eq chatId) }
+                    .groupBy(MessagesHistory.date.date())
+                    .orderBy(MessagesHistory.date.date())
+                    .associate {
+                        it[MessagesHistory.date.date()] to UserStat(
+                            messageCount = it[MessagesHistory.messageId.count()],
+                            charCount = it[MessagesHistory.text.charLengthSum()])
+                    }
         } else {
-            slice(MessagesHistory.userId, MessagesHistory.date.max())
-                    .select { MessagesHistory.chatId eq chatId }
-                    .groupBy(MessagesHistory.userId)
-                    .associate { it[MessagesHistory.userId] to it[MessagesHistory.date.max()] }
+            slice(MessagesHistory.date.date(), MessagesHistory.messageId.count(), MessagesHistory.text.charLengthSum())
+                    .select { (MessagesHistory.userId eq userId) and
+                            (MessagesHistory.chatId eq chatId) }
+                    .groupBy(MessagesHistory.date.date())
+                    .orderBy(MessagesHistory.date.date())
+                    .associate {
+                        it[MessagesHistory.date.date()] to UserStat(
+                                messageCount = it[MessagesHistory.messageId.count()],
+                                charCount = it[MessagesHistory.text.charLengthSum()])
+                    }
         }
     }
 }
 
-fun MessagesHistory.getUserMessages(chatId: Int, userId: Int, datetime: DateTime? = null): List<HistoryMessage> {
+fun MessagesHistory.getLastMessagesForUsersByChat(
+        chatId: Int
+): Map<Int, DateTime?> {
+
+    return transaction {
+        slice(MessagesHistory.userId, MessagesHistory.date.max())
+                .select { MessagesHistory.chatId eq chatId }
+                .groupBy(MessagesHistory.userId)
+                .associate { it[MessagesHistory.userId] to it[MessagesHistory.date.max()] }
+    }
+}
+
+fun MessagesHistory.getLastMessageForUserByChatAndUserId(
+        chatId: Int,
+        userId: Int
+): DateTime? {
+
+    return transaction {
+        slice(MessagesHistory.userId, MessagesHistory.date.max())
+                .select { (MessagesHistory.userId eq userId) and
+                    (MessagesHistory.chatId eq chatId) }
+                .singleOrNull()
+                ?.let { it[MessagesHistory.date.max()] }
+    }
+}
+
+fun MessagesHistory.getFirstMessageDateByChat(
+        chatId: Int,
+        datetime: DateTime? = null
+): DateTime? {
+
+    return transaction {
+        if (datetime != null) {
+            slice(MessagesHistory.date.min())
+                    .select { (MessagesHistory.date greaterEq datetime) and
+                            (MessagesHistory.chatId eq chatId) }
+                    .single()
+                    .let { it[MessagesHistory.date.min()] }
+        } else {
+            slice(MessagesHistory.date.min())
+                    .select { MessagesHistory.chatId eq chatId }
+                    .single()
+                    .let { it[MessagesHistory.date.min()] }
+        }
+    }
+}
+
+fun MessagesHistory.getFirstMessageDateByChatAndUser(
+        chatId: Int,
+        userId: Int,
+        datetime: DateTime? = null
+): DateTime? {
+
+    return transaction {
+        if (datetime != null) {
+            slice(MessagesHistory.date.min())
+                    .select { (MessagesHistory.date greaterEq datetime) and
+                            (MessagesHistory.userId eq userId) and
+                            (MessagesHistory.chatId eq chatId) }
+                    .singleOrNull()
+                    ?.let { it[MessagesHistory.date.min()] }
+        } else {
+            slice(MessagesHistory.date.min())
+                    .select { (MessagesHistory.userId eq userId) and
+                        (MessagesHistory.chatId eq chatId) }
+                    .singleOrNull()
+                    ?.let { it[MessagesHistory.date.min()] }
+        }
+    }
+}
+
+fun MessagesHistory.getUserMessages(
+        chatId: Int,
+        userId: Int,
+        datetime: DateTime? = null
+): List<HistoryMessage> {
+
     return transaction {
         if (datetime != null) {
             select { (MessagesHistory.date greaterEq datetime) and
@@ -112,25 +209,6 @@ fun MessagesHistory.getUserMessages(chatId: Int, userId: Int, datetime: DateTime
                     (MessagesHistory.chatId eq chatId) }
                     .orderBy(MessagesHistory.date)
                     .map(ResultRow::toHistoryMessage)
-        }
-    }
-}
-
-fun MessagesHistory.getFirstMessageDateByChat(chatId: Int, datetime: DateTime? = null): DateTime? {
-    return if (datetime != null) {
-        transaction {
-            slice(MessagesHistory.date.min())
-                    .select { (MessagesHistory.date greaterEq datetime) and
-                                (MessagesHistory.chatId eq chatId) }
-                    .firstOrNull()
-                    ?.let { it[MessagesHistory.date.min()] }
-        }
-    } else {
-        transaction {
-            slice(MessagesHistory.date.min())
-                    .select { MessagesHistory.chatId eq chatId }
-                    .firstOrNull()
-                    ?.let { it[MessagesHistory.date.min()] }
         }
     }
 }
