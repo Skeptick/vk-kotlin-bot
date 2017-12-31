@@ -9,16 +9,12 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import tk.skeptick.bot.BotApplication
 import tk.skeptick.bot.Chat
 import tk.skeptick.bot.DefaultMessageRoute
-import java.io.InputStream
 import java.util.*
 
-val appProperties by lazy { Properties().apply { load(loadProperties()) } }
+val appProperties by lazy { loadProperties() }
 
 fun main(args: Array<String>) = runBlocking {
-    val config = HikariConfig("/hikari.properties")
-    val dataSource = HikariDataSource(config)
-    Database.connect(dataSource)
-    transaction { SchemaUtils.create(MessagesHistory, Settings) }
+    initDatabase()
 
     val bot = BotApplication(appProperties.getProperty("accessToken"))
     bot.anyMessage { chat() }
@@ -55,7 +51,18 @@ private fun savePts(pts: Long) {
     }
 }
 
-private fun loadProperties(): InputStream {
-    return Thread.currentThread().contextClassLoader
+private fun initDatabase() {
+    val config = HikariConfig("/hikari.properties")
+    val dataSource = HikariDataSource(config)
+    Database.connect(dataSource)
+    transaction { SchemaUtils.create(MessagesHistory, Settings) }
+}
+
+private fun loadProperties(): Properties {
+    val properties = Properties()
+    Thread.currentThread().contextClassLoader
             .getResourceAsStream("application.properties")
+            .apply { properties.load(this) }
+
+    return properties
 }
