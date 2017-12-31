@@ -8,7 +8,7 @@ fun TypedMessageRoute<Chat>.about() {
         intercept {
             val response = with(StringBuilder()) {
                 append("Ты не робот, а я - да.\n\n")
-                append("Исходный код бот и библиотека для создания своего на языке Kotlin:\n")
+                append("Исходный код бота и библиотека для создания своего на языке Kotlin:\n")
                 append("https://github.com/Skeptick/vk-kotlin-bot")
             }
 
