@@ -13,6 +13,8 @@ dependencies {
 
     compile "com.github.kittinunf.fuel:fuel:$fuel_version"
     compile "ch.qos.logback:logback-classic:$logback_version"
+    compile "org.json:json:20171018"
+
 
     testCompile "junit:junit:4.12"
 }

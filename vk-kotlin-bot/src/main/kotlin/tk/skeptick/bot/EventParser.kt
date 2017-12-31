@@ -2,14 +2,12 @@ package tk.skeptick.bot
 
 import tk.skeptick.bot.SenderType.*
 import tk.skeptick.bot.ServiceActType.*
-import kotlinx.serialization.internal.StringSerializer
-import kotlinx.serialization.json.JSON
-import kotlinx.serialization.map
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlin.math.absoluteValue
 
 internal object EventParser {
 
-    private val bracesRegex = Regex("[{}]")
     private val eventTypes = enumValues<EventType>().map { it.id to it }.toMap()
 
     private fun getSenderType(peerId: Int): SenderType = when {
@@ -24,11 +22,9 @@ internal object EventParser {
         USER -> peerId
     }
 
-    private fun parseAttachments(event: String): Map<String, String> =
-            if (event.contains(bracesRegex)) {
-                val attachments = event.substring(event.indexOf('{')..event.indexOf('}'))
-                JSON.parse((StringSerializer to StringSerializer).map, attachments)
-            } else emptyMap()
+    private fun parseAttachments(obj: JSONObject?): Map<String, String> =
+            obj?.toMap()?.mapValues { it.value.toString() } ?: emptyMap()
+
 
     private fun parseMediaAttachments(attachments: Map<String, String>): List<AttachmentType> =
             attachments.mapNotNull { (key, value) ->
@@ -55,17 +51,19 @@ internal object EventParser {
     private fun getMidUserId(attachments: Map<String, String>): Int =
             attachments["source_mid"]?.toInt() ?: 0
 
-    private fun parseEvent(event: String): Event? {
-        val fields = event.substringBeforeLast('{').split(',').takeIf { it.size >= 6 } ?: return null
-        fields[0].toInt().let(eventTypes::get).takeIf { it == EventType.NEW_MESSAGE } ?: return null
+    private fun parseEvent(event: JSONArray): Event? {
+        event.optInt(0).let(eventTypes::get).takeIf { it == EventType.NEW_MESSAGE } ?: return null
 
-        val (_, messageId, flags, peerId, timestamp) = fields.take(5).map(String::toInt)
-        val text = event.substringAfter(",\"").substringBeforeLast("\",{")
+        val messageId = event.optInt(1).takeIf { it > 0 } ?: return null
+        val flags = event.optInt(2).takeIf { it > 0 } ?: return null
+        val peerId = event.optInt(3).takeIf { it != 0 } ?: return null
+        val timestamp = event.optInt(4).takeIf { it > 0 } ?: return null
+        val text = event.optString(5)
 
         val senderType = getSenderType(peerId)
         val senderId = getSenderId(peerId, senderType)
 
-        val attachments = parseAttachments(event.substringAfter(text))
+        val attachments = event.optJSONObject(6).let(EventParser::parseAttachments)
         val mediaAttachments = parseMediaAttachments(attachments)
         val hasForwardedMessages = hasForwardedMessages(attachments)
 
@@ -93,15 +91,9 @@ internal object EventParser {
         }
     }
 
-    private fun String.ejectArray() = this.substringAfter('[').substringBeforeLast(']')
-
     fun parse(json: String): List<Event> {
-        return json.ejectArray()
-                .takeIf(String::isNotEmpty)
-                ?.ejectArray()
-                ?.split("],[")
-                ?.mapNotNull { parseEvent(it) }
-                ?: emptyList()
+        val updates = JSONObject(json).getJSONArray("updates")
+        return updates.mapNotNull { parseEvent(it as JSONArray) }
     }
 
 }
