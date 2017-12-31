@@ -15,51 +15,45 @@ VK Kotlin Bot
 --------------------
 ```kotlin
 fun main(args: Array<String>) = runBlocking {
-  val bot = BotApplication("YOUR_ACCESS_TOKEN")
-  bot.anyMessage { main() }
-  bot.onChatPhotoRemove { /* ... */ }
-  bot.onChatKickUser { /* ... */ }
-  bot.run()
+    val bot = BotApplication("YOUR_ACCESS_TOKEN")
+    bot.anyMessage { main() }
+    bot.onChatPhotoRemove { /* ... */ }
+    bot.onChatKickUser { /* ... */ }
+    bot.run()
 }
 
 fun DefaultMessageRoute.main() {
 
-  onMessageFrom<Chat> {
-    // сюда пройдут только сообщения из чата
-    // помимо <Chat> доступны параметры User и Community
+    onMessageFrom<Chat> {
+        // сюда пройдут только сообщения из чата
+        // помимо <Chat> доступны параметры User и Community
             
-    onIncomingMessage {
-      // сюда пройдут только входящие сообщения из чата
+        onIncomingMessage {
+        // сюда пройдут только входящие сообщения из чата
               
-      onMessage("привет") {
-        // только входящие сообщения из чата 
-        // начинающиеся с "привет"
+            onMessage("привет") {
+                // только входящие сообщения из чата 
+                // начинающиеся с "привет"
         
-        handle { 
-          // код в этом блоке отработает в любом случае
-        }
-        
-        onMessage("бот", "робот") { 
-          // ...
-        }
-        
-        onMessage("как дела") {
-          // ...
-        }
+                handle { /* код в этом блоке отработает в любом случае */ }
+            
+                onMessage("бот", "робот") { /* ... */ }
+            
+                onMessage("как дела") { /* ... */ }
          
-        intercept { 
-          // код в этом блоке отработает, 
-          // только если событие не удовлетворяет 
-          // ни одному другому маршруту.
+                intercept { 
+                    // код в этом блоке отработает, 
+                    // только если событие не удовлетворяет 
+                    // ни одному другому маршруту.
           
-          it.message.respondWithForward("Неизвестная команда!")
-        }
+                    it.message.respondWithForward("Неизвестная команда!")
+                }
         
-      }
+            }
       
-    }
+        }
     
-  }
+    }
   
 }
 ```
