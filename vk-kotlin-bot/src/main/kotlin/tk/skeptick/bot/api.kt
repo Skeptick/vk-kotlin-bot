@@ -31,6 +31,12 @@ private object Methods {
         const val saveMessagesPhoto = it + "saveMessagesPhoto"
     }
 
+    object Friends {
+        private const val it = "friends."
+        const val add = it + "add"
+        const val getRequests = it + "getRequests"
+    }
+
 }
 
 class VkApi(private val context: ApplicationContext, accessToken: String) {
@@ -127,6 +133,30 @@ class VkApi(private val context: ApplicationContext, accessToken: String) {
                 "count" to 200,
                 "rev" to 1
         )).execRequest(serializer)?.items
+    }
+
+    @Suppress("unused")
+    suspend fun getFriendsRequests(
+            offset: Int = 0,
+            withViewed: Boolean = true,
+            out: Boolean = false): List<Int>? {
+
+        val serializer = ListResponse.serializer(IntSerializer)
+        return Methods.Friends.getRequests.httpGet(listOf(
+                "offset" to offset,
+                "count" to 1000,
+                "need_viewed" to if (withViewed) 1 else 0,
+                "out" to if (out) 1 else 0
+        )).execRequest(serializer)?.items
+    }
+
+    @Suppress("unused")
+    suspend fun addFriend(userId: Int, declineRequest: Boolean = false): Int? {
+        val serializer = IntSerializer
+        return Methods.Friends.add.httpGet(listOf(
+                "user_id" to userId,
+                "follow" to if (declineRequest) 1 else 0
+        )).execRequest(serializer)
     }
 
     suspend internal fun getLongPollServer(): LongPollServerResponse? {

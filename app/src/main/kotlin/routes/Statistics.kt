@@ -105,11 +105,14 @@ private suspend fun ApplicationContext.getStatisticsForAll(
 
     if (days == null) {
         val lastMessagesForUsers = MessagesHistory.getLastMessagesForUsersByChat(chatId)
-        val presentUsersMessageDate = users.mapNotNull { user ->
-            lastMessagesForUsers[user.id]?.let {
-                (user.firstName + ' ' + user.lastName) to it
-            }
-        }.filter { now.diffInDays(it.second) > 0 }.sortedBy { it.second }
+        val presentUsersMessageDate = users
+                .mapNotNull { user ->
+                    lastMessagesForUsers[user.id]?.let {
+                        (user.firstName + ' ' + user.lastName) to it
+                    }
+                }
+                .filter { now.diffInDays(it.second) > 0 }
+                .sortedBy { it.second }
 
         if (presentUsersMessageDate.isNotEmpty()) {
             result.append('\n')
@@ -151,7 +154,7 @@ private suspend fun ApplicationContext.getStatisticsForUser(
 
     val messagesByDate = MessagesHistory
             .getMessagesCountForUserByChatAndUserId(chatId, user.id, minDate)
-            .toList().takeLast(30)
+            .toList()
 
     if (messagesByDate.isEmpty() && days == null)
         return "Ещё нет статистики для указанного пользователя."
@@ -181,7 +184,7 @@ private suspend fun ApplicationContext.getStatisticsForUser(
             result.append("${date.dateString()} — 0 / 0\n")
 
     var prevDay: DateTime? = null
-    messagesByDate.forEach {
+    messagesByDate.takeLast(30).forEach {
         if (prevDay == null || it.first.diffInDays(prevDay!!) == 1) {
             prevDay = it.first
             addDateCounter(it)
@@ -201,8 +204,7 @@ private suspend fun ApplicationContext.getStatisticsForUser(
 
     val allMessages = messagesByDate.sumBy { it.second.messageCount }
     val allChars = messagesByDate.sumBy { it.second.charCount }
-    if (days == null) result.append("\nЗа всё время: $allMessages / $allChars\n")
-    else with(result) {
+    with(result) {
         append("\nВсего за $dayBefore ")
         append("${getDeclensionDays(dayBefore)}: ")
         append("$allMessages / $allChars\n")

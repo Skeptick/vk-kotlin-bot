@@ -15,11 +15,7 @@ abstract class MessageRoute<E : MessageEvent>(
     private var handler: (suspend ApplicationContext.(Call<E>) -> Unit)? = null
     private var interceptor: (suspend ApplicationContext.(Call<E>) -> Unit)? = null
 
-    private val comparator = compareByDescending<MessageRoute<*>> {
-        (it.phrases.firstOrNull() ?: "").length
-    }
-
-    internal val children: MutableSet<MessageRoute<*>> = sortedSetOf(comparator)
+    internal val children: MutableSet<MessageRoute<*>> = mutableSetOf()
 
     @Suppress("unchecked_cast")
     suspend internal fun pass(message: E, routePath: RoutePath) {

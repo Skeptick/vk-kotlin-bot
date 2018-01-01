@@ -9,6 +9,7 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import tk.skeptick.bot.BotApplication
 import tk.skeptick.bot.Chat
 import tk.skeptick.bot.DefaultMessageRoute
+import tk.skeptick.bot.User
 import java.util.*
 
 val appProperties by lazy { loadProperties() }
@@ -36,6 +37,13 @@ private fun DefaultMessageRoute.chat() {
             about()
             help()
             statistics()
+            addFriendChat()
+        }
+    }
+
+    onMessageFrom<User> {
+        onIncomingMessage {
+            addFriendUser()
         }
     }
 }

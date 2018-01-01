@@ -133,10 +133,9 @@ class BotApplication(accessToken: String) : ApplicationContext(accessToken) {
             }
 
             ts = result.ts
-            result.pts.takeIf { it != 0L }?.apply {
-                pts = this
-                ptsUpdatedHandler?.let { it(this) }
-            }
+            result.pts.takeIf { it != 0L }
+                    ?.apply { pts = this }
+                    ?.apply { ptsUpdatedHandler?.let { it(this) } }
 
             EventParser.parse(responseString)
                     .apply { log.info("Received ${this.size} events") }
