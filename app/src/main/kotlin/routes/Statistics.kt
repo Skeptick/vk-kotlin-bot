@@ -52,11 +52,10 @@ fun TypedMessageRoute<Chat>.statistics() {
                     it.message.respondWithForward(response)
 
                 }
-            } else {
 
+            } else {
                 val result = getStatisticsForAll(it.message.chatId) ?: return@intercept
                 it.message.respondWithForward(result)
-
             }
         }
 
@@ -235,7 +234,7 @@ private fun getDeclensionDays(num: Int): String {
         num == 1 -> "день"
         num == 2 || num == 3 || num == 4 -> "дня"
         num > 20 && num % 10 == 1 -> "день"
-        num > 20 && num % 10 == 2 || num % 10 == 3 || num % 10 == 4 -> "дня"
+        num > 20 && (num % 10 == 2 || num % 10 == 3 || num % 10 == 4) -> "дня"
         else -> "дней"
     }
 }
@@ -244,7 +243,7 @@ private fun DateTime.round(): DateTime =
         withTime(0, 0, 0, 0)
 
 private fun DateTime.dateString(): String =
-        "$dayOfMonth.$monthOfYear.$year"
+        String.format("%02d.%02d.%4d", dayOfMonth, monthOfYear, year)
 
 private fun DateTime.diffInDays(other: DateTime): Int =
         ((millis - other.millis).toDouble() / 1000 / 60 / 60 / 24).toInt().absoluteValue

@@ -285,16 +285,16 @@ data class AudioMessageDocumentPreview internal constructor(
 @Serializable
 data class WallPost internal constructor(
         @SerialName("id") val id: Int,
-        @SerialName("to_id") val toId: Int,
+        @SerialName("owner_id") val ownerId: Int,
         @SerialName("from_id") val fromId: Int,
         @SerialName("date") val date: Int,
         @SerialName("text") val text: String,
         @SerialName("comments") val comments: WallPostComments,
         @SerialName("likes") val likes: WallPostLikes,
         @SerialName("reposts") val reposts: WallPostReposts,
-        @SerialName("views") val views: WallPostViews,
         @SerialName("post_type") private val type: String,
         // TODO attachments
+        @Optional @SerialName("views") val views: WallPostViews? = null,
         @Optional @SerialName("reply_owner_id") val replyOwnerId: Int? = null,
         @Optional @SerialName("reply_post_id") val replyPostId: Int? = null,
         @Optional @SerialName("friends_only") private val friendsOnly: Int = 0,

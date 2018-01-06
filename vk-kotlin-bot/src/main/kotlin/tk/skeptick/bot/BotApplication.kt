@@ -1,6 +1,7 @@
 package tk.skeptick.bot
 
-import kotlinx.coroutines.experimental.launch
+import kotlinx.coroutines.experimental.channels.SendChannel
+import kotlinx.coroutines.experimental.channels.actor
 
 class BotApplication(accessToken: String) : ApplicationContext(accessToken) {
 
@@ -17,19 +18,31 @@ class BotApplication(accessToken: String) : ApplicationContext(accessToken) {
     internal var historyHandler: (ApplicationContext.(List<Message>) -> Unit)? = null
     internal var ptsUpdatedHandler: (ApplicationContext.(Long) -> Unit)? = null
 
-    suspend private fun handle(event: Event) {
-        when (event.eventType) {
-            EventType.NEW_MESSAGE -> when ((event as MessageEvent).actType) {
-                ServiceActType.CHAT_CREATE -> chatCreateEventHandler?.let { it(event as ChatCreateEvent) }
-                ServiceActType.CHAT_TITLE_UPDATE -> chatTitleUpdateEventHandler?.let { it(event as ChatTitleUpdateEvent) }
-                ServiceActType.CHAT_PHOTO_UPDATE -> chatPhotoUpdateEventHandler?.let { it(event as ChatPhotoUpdateEvent) }
-                ServiceActType.CHAT_PHOTO_REMOVE -> chatPhotoRemoveEventHandler?.let { it(event as ChatPhotoRemoveEvent) }
-                ServiceActType.CHAT_INVITE_USER -> chatInviteUserEventHandler?.let { it(event as ChatInviteUserEvent) }
-                ServiceActType.CHAT_KICK_USER -> chatKickUserEventHandler?.let { it(event as ChatKickUserEvent) }
-                ServiceActType.NONE -> messageHandler?.pass(event, RoutePath(String(), event.text))
-                ServiceActType.UNKNOWN -> Unit
+    private val eventAllocator: SendChannel<Event> = actor {
+        val peers = mutableMapOf<Int, SendChannel<MessageEvent>>()
+        for (event in channel) {
+            if (event is MessageEvent) {
+                peers[event.peerId]?.send(event) ?: peerChannel()
+                        .apply { peers.put(event.peerId, this) }
+                        .also { it.send(event) }
             }
-            else -> Unit
+        }
+    }
+
+    private fun peerChannel(): SendChannel<MessageEvent> = actor {
+        for (event in channel) { handleMessageEvent(event) }
+    }
+
+    suspend private fun handleMessageEvent(event: MessageEvent) {
+        when (event.actType) {
+            ServiceActType.CHAT_CREATE -> chatCreateEventHandler?.let { it(event as ChatCreateEvent) }
+            ServiceActType.CHAT_TITLE_UPDATE -> chatTitleUpdateEventHandler?.let { it(event as ChatTitleUpdateEvent) }
+            ServiceActType.CHAT_PHOTO_UPDATE -> chatPhotoUpdateEventHandler?.let { it(event as ChatPhotoUpdateEvent) }
+            ServiceActType.CHAT_PHOTO_REMOVE -> chatPhotoRemoveEventHandler?.let { it(event as ChatPhotoRemoveEvent) }
+            ServiceActType.CHAT_INVITE_USER -> chatInviteUserEventHandler?.let { it(event as ChatInviteUserEvent) }
+            ServiceActType.CHAT_KICK_USER -> chatKickUserEventHandler?.let { it(event as ChatKickUserEvent) }
+            ServiceActType.NONE -> messageHandler?.pass(event, RoutePath(String(), event.text))
+            ServiceActType.UNKNOWN -> Unit
         }
     }
 
@@ -139,7 +152,7 @@ class BotApplication(accessToken: String) : ApplicationContext(accessToken) {
 
             EventParser.parse(responseString)
                     .apply { log.info("Received ${this.size} events") }
-                    .onEach { launch { handle(it) } }
+                    .onEach { eventAllocator.send(it) }
         }
     }
 
