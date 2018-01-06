@@ -38,8 +38,7 @@ internal suspend fun BotApplication.handleLongPollHistory(ts: Long) {
                     logInfo.append("Received ${messages.size} messages, ")
                             .append("from ${messages.first().id} ")
                             .append("to ${messages.last().id}")
-                else
-                    logInfo.append("Received 0 messages")
+                else logInfo.append("Received 0 messages")
 
                 log.info(logInfo.toString())
                 handler(messages)

@@ -43,8 +43,7 @@ private suspend fun ApplicationContext.addFriend(userId: Int): String? {
     if (!usersRequested.contains(userId))
         return "Сперва отправь мне запрос в друзья."
 
-    val result = api.addFriend(userId)
-    return if (result != null) "Заявка в друзья одобрена." else null
+    return api.addFriend(userId)?.let { "Заявка в друзья одобрена." }
 }
 
 private fun retrieveUserId(restOfMessage: String, fromUserId: Int): Int {

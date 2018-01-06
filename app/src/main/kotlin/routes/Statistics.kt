@@ -74,17 +74,17 @@ private suspend fun ApplicationContext.getStatisticsForAll(
     val minDate = days?.let { now.minusDays(it - 1).round() }
 
     val users = api.getChatUsers(chatId) ?: return null
-    val countMessagesForUsers = MessagesHistory.getMessagesCountForUsersByChat(chatId, minDate)
+    val userStats = MessagesHistory.getMessagesCountForUsersByChat(chatId, minDate)
     val firstMessageDate = MessagesHistory.getFirstMessageDateByChat(chatId, minDate) ?: return null
 
-    val presentUsersCounter = users.mapNotNull { user ->
-        countMessagesForUsers[user.id]?.let {
-            (user.firstName + ' ' + user.lastName) to it
+    val presentUserStats = users.mapNotNull { user ->
+        userStats[user.id]?.let { userStat ->
+            (user.firstName + ' ' + user.lastName) to userStat
         }
     }
 
     val absentUsers = users.mapNotNull { user ->
-        if (countMessagesForUsers[user.id] == null)
+        if (userStats[user.id] == null)
             user.firstName + ' ' + user.lastName
         else null
     }
@@ -94,7 +94,7 @@ private suspend fun ApplicationContext.getStatisticsForAll(
     result.append("Статистика за $dayBefore ${getDeclensionDays(dayBefore)}.\n\n")
     result.append("Кол-во сообщений / символов:\n")
 
-    presentUsersCounter
+    presentUserStats
             .sortedByDescending { it.second.messageCount }
             .forEachIndexed { i, pair ->
                 result.append("${i + 1}. ${pair.first}")
@@ -151,13 +151,13 @@ private suspend fun ApplicationContext.getStatisticsForUser(
     val user = users.find { (it.firstName + ' ' + it.lastName).equals(username, true) }
             ?: return "Не удалось найти указанного пользователя."
 
-    val messagesByDate = MessagesHistory
+    val userStatByDate = MessagesHistory
             .getMessagesCountForUserByChatAndUserId(chatId, user.id, minDate)
             .toList()
 
-    if (messagesByDate.isEmpty() && days == null)
+    if (userStatByDate.isEmpty() && days == null)
         return "Ещё нет статистики для указанного пользователя."
-    else if (messagesByDate.isEmpty())
+    else if (userStatByDate.isEmpty())
         return "Нет статистики для этого пользователя за указанный период."
 
     val lastMessageDate = MessagesHistory
@@ -165,7 +165,7 @@ private suspend fun ApplicationContext.getStatisticsForUser(
             ?: return null
 
     val correctUsername = user.firstName + ' ' + user.lastName
-    val dayBefore = messagesByDate.first().first.diffInDays(now) + 1
+    val dayBefore = userStatByDate.first().first.diffInDays(now) + 1
     val result = with(StringBuilder()) {
         append("Статистика пользователя $correctUsername (id${user.id}) ")
         append("за $dayBefore ${getDeclensionDays(dayBefore)}.\n")
@@ -183,7 +183,7 @@ private suspend fun ApplicationContext.getStatisticsForUser(
             result.append("${date.dateString()} — 0 / 0\n")
 
     var prevDay: DateTime? = null
-    messagesByDate.takeLast(30).forEach {
+    userStatByDate.takeLast(30).forEach {
         if (prevDay == null || it.first.diffInDays(prevDay!!) == 1) {
             prevDay = it.first
             addDateCounter(it)
@@ -201,8 +201,8 @@ private suspend fun ApplicationContext.getStatisticsForUser(
         addEmptyCounter(prevDay!!)
     }
 
-    val allMessages = messagesByDate.sumBy { it.second.messageCount }
-    val allChars = messagesByDate.sumBy { it.second.charCount }
+    val allMessages = userStatByDate.sumBy { it.second.messageCount }
+    val allChars = userStatByDate.sumBy { it.second.charCount }
     with(result) {
         append("\nВсего за $dayBefore ")
         append("${getDeclensionDays(dayBefore)}: ")

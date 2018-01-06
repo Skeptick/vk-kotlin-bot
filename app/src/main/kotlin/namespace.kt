@@ -10,7 +10,7 @@ fun Column<String>.charLengthSum() = CharLengthSum(this, this.columnType)
 
 
 fun String.isNumber(): Boolean {
-    return all { it.isDigit() }
+    return isNotEmpty() && all { it.isDigit() }
 }
 
 fun String.equalsLeastOne(vararg suffix: String): Boolean {

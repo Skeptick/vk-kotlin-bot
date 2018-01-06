@@ -92,8 +92,10 @@ internal object EventParser {
     }
 
     fun parse(json: String): List<Event> {
-        val updates = JSONObject(json).getJSONArray("updates")
-        return updates.mapNotNull { parseEvent(it as JSONArray) }
+        return JSONObject(json)
+                .getJSONArray("updates")
+                .map(::JSONArray)
+                .mapNotNull(EventParser::parseEvent)
     }
 
 }

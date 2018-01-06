@@ -23,7 +23,7 @@ class BotApplication(accessToken: String) : ApplicationContext(accessToken) {
         for (event in channel) {
             if (event is MessageEvent) {
                 peers[event.peerId]?.send(event) ?: peerChannel()
-                        .apply { peers.put(event.peerId, this) }
+                        .also { peers.put(event.peerId, it) }
                         .also { it.send(event) }
             }
         }
@@ -136,9 +136,9 @@ class BotApplication(accessToken: String) : ApplicationContext(accessToken) {
                 when (result.failed) {
                     1 -> ts = result.ts
                     2 -> key = getLongPollServerLoop().key
-                    3 -> getLongPollServerLoop().apply {
-                        key = this.key
-                        ts = this.ts
+                    3 -> getLongPollServerLoop().also {
+                        key = it.key
+                        ts = it.ts
                         handleLongPollHistory(ts)
                     }
                 }
@@ -147,11 +147,11 @@ class BotApplication(accessToken: String) : ApplicationContext(accessToken) {
 
             ts = result.ts
             result.pts.takeIf { it != 0L }
-                    ?.apply { pts = this }
-                    ?.apply { ptsUpdatedHandler?.let { it(this) } }
+                    ?.also { pts = it }
+                    ?.also { ptsUpdatedHandler?.let { it(pts) } }
 
             EventParser.parse(responseString)
-                    .apply { log.info("Received ${this.size} events") }
+                    .also { log.info("Received ${it.size} events") }
                     .onEach { eventAllocator.send(it) }
         }
     }
