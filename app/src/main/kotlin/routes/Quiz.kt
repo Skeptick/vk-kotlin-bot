@@ -1,295 +1,140 @@
 package routes
 
-import kotlinx.coroutines.experimental.Job
-import kotlinx.coroutines.experimental.cancelAndJoin
-import kotlinx.coroutines.experimental.channels.SendChannel
-import kotlinx.coroutines.experimental.channels.actor
 import kotlinx.coroutines.experimental.delay
-import kotlinx.coroutines.experimental.launch
-import routes.QuizAction.*
 import tk.skeptick.bot.ApplicationContext
 import tk.skeptick.bot.Chat
 import tk.skeptick.bot.TypedMessageRoute
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-typealias Context = ApplicationContext
+private data class Quiz(
+        val question: String,
+        val answer: String,
+        var lettersOpenNum: Int,
+        var alreadyAnswered: Boolean = false,
+        var isActive: Boolean = true)
 
-sealed class QuizAction(open val peerId: Int) {
-
-    class StartQuiz(
-            val context: Context,
-            override val peerId: Int,
-            private val messageId: Int
-    ) : QuizAction(peerId) {
-
-        suspend fun sendAlreadyStarted() {
-            val response = with(StringBuilder()) {
-                append("В этом чате уже запущена викторина.\n")
-                append("Подождите, скоро будет новый вопрос.")
-            }
-
-            context.respond(peerId, response, messageId)
-        }
-
-        suspend fun sendOldQuestion(question: String, answer: String, hintCount: Int) {
-            val hint = makeHint(answer, hintCount)
-            val response = with(StringBuilder()) {
-                append("В этом чате уже запущена викторина.\n")
-                append("Текущий вопрос: $question\n")
-                append("Текущая подсказка: $hint")
-            }
-
-            context.respond(peerId, response, messageId)
-        }
-
-        suspend fun sendNewQuestion(question: String): Int {
-            return context.respond(peerId, question) ?: 0
-        }
-
-    }
-
-    class StopQuiz(
-            val context: Context,
-            override val peerId: Int,
-            private val messageId: Int
-    ) : QuizAction(peerId) {
-
-        suspend fun sendNotRunning() {
-            context.respond(peerId, "В вашем чате не запущена викторина.", messageId)
-        }
-
-        suspend fun sendStoppedOnPause() {
-            context.respond(peerId, "Викторина остановлена.", messageId)
-        }
-
-        suspend fun sendStopped() {
-            context.respond(peerId, "Викторина остановлена. Ответа не будет.", messageId)
-        }
-
-    }
-
-    class ContinueQuiz(
-            val context: Context,
-            override val peerId: Int
-    ) : QuizAction(peerId) {
-
-        suspend fun sendNewQuestion(question: String): Int {
-            return context.respond(peerId, question) ?: 0
-        }
-
-    }
-
-    class SendHint(
-            val context: Context,
-            override val peerId: Int
-    ) : QuizAction(peerId) {
-
-        suspend fun sendHint(questionMessage: Int, answer: String, hintCount: Int) {
-            val hint = makeHint(answer, hintCount)
-            context.respond(peerId, "Подсказка: $hint", questionMessage)
-        }
-
-        suspend fun sendLastHint(questionMessage: Int, answer: String) {
-            val response = with(StringBuilder()) {
-                append("Никто не дал правильного ответа.\n")
-                append("Правильный ответ: $answer")
-            }
-
-            context.respond(peerId, response, questionMessage)
-        }
-
-    }
-
-    class CheckAnswer(
-            val context: Context,
-            override val peerId: Int,
-            private val messageId: Int,
-            val text: String
-    ) : QuizAction(peerId) {
-
-        suspend fun sendSuccessful() {
-            context.respond(peerId, "Поздравляю! Вы правы!", messageId)
-        }
-
-    }
-
-    class RemoveQuiz(override val peerId: Int) : QuizAction(peerId)
-
-}
-
-private val quizManager = actor<QuizAction> {
-    val quizzes = mutableMapOf<Int, SendChannel<QuizAction>>()
-    for (action in channel) {
-        when (action) {
-            is RemoveQuiz -> {
-                quizzes[action.peerId]?.close()
-                quizzes.remove(action.peerId)
-            }
-
-            is StartQuiz, is StopQuiz -> {
-                quizzes[action.peerId]?.send(action)
-                        ?: quizActor()
-                        .apply { quizzes.put(action.peerId, this) }
-                        .also { it.send(action) }
-            }
-
-            else -> quizzes[action.peerId]?.send(action)
-        }
-    }
-}
-
-private fun quizActor(): SendChannel<QuizAction> = actor {
-    var question = String()
-    var answer = String()
-    var hintCount = 0
-
-    var isRunning = false
-    var isAnswered = false
-
-    var awaitHint: Job? = null
-    var awaitContinue: Job? = null
-
-    var questionMessage = 0
-
-    fun updateQuiz() {
-        val quiz = makeQuiz()
-        question = quiz.first
-        answer = quiz.second
-        isRunning = true
-        isAnswered = false
-        hintCount = 0
-    }
-
-    for (action in channel) {
-        when (action) {
-            is StartQuiz -> {
-                when {
-                    isRunning && isAnswered -> action.sendAlreadyStarted()
-                    isRunning -> action.sendOldQuestion(question, answer, hintCount)
-                    else -> {
-                        updateQuiz()
-                        questionMessage = action.sendNewQuestion(question)
-                        when (questionMessage) {
-                            0 -> quizManager.send(RemoveQuiz(action.peerId))
-                            else -> awaitHint = awaitHint(action.context, action.peerId)
-                        }
-                    }
-                }
-            }
-
-            is StopQuiz -> {
-                when {
-                    !isRunning -> action.sendNotRunning()
-                    isAnswered -> action.sendStoppedOnPause()
-                    else -> action.sendStopped()
-                }
-
-                awaitContinue?.cancelAndJoin()
-                awaitHint?.cancelAndJoin()
-                quizManager.send(RemoveQuiz(action.peerId))
-            }
-
-            is ContinueQuiz -> {
-                updateQuiz()
-                questionMessage = action.sendNewQuestion(question)
-                when (questionMessage) {
-                    0 -> quizManager.send(RemoveQuiz(action.peerId))
-                    else -> awaitHint = awaitHint(action.context, action.peerId)
-                }
-            }
-
-            is SendHint -> {
-                when {
-                    isRunning && !isAnswered && hintCount < 4 && answer.lastIndex > hintCount -> {
-                        hintCount++
-                        action.sendHint(questionMessage, answer, hintCount)
-                        awaitHint = awaitHint(action.context, action.peerId)
-                    }
-                    isRunning && !isAnswered -> {
-                        isAnswered = true
-                        action.sendLastHint(questionMessage, answer)
-                        awaitContinue = awaitContinue(action.context, action.peerId)
-                    }
-                }
-            }
-
-            is CheckAnswer -> {
-                if (isRunning && !isAnswered && action.text.startsWith(answer, true)) {
-                    isAnswered = true
-                    action.sendSuccessful()
-                    awaitContinue = awaitContinue(action.context, action.peerId)
-                }
-            }
-        }
-    }
-}
-
-private fun awaitHint(context: Context, peerId: Int): Job = launch {
-    delay(30, TimeUnit.SECONDS)
-    quizManager.send(SendHint(
-            context = context,
-            peerId = peerId
-    ))
-}
-
-private fun awaitContinue(context: Context, peerId: Int): Job = launch {
-    delay(5, TimeUnit.SECONDS)
-    quizManager.send(ContinueQuiz(
-            context = context,
-            peerId = peerId
-    ))
-}
-
-fun TypedMessageRoute<Chat>.quiz() {
-
-    onMessage("викторина") {
-        onMessage("стоп") {
-            intercept {
-                quizManager.send(StopQuiz(
-                        context = this,
-                        peerId = it.message.peerId,
-                        messageId = it.message.messageId
-                ))
-            }
-        }
-
-        intercept {
-            quizManager.send(StartQuiz(
-                    context = this,
-                    peerId = it.message.peerId,
-                    messageId = it.message.messageId
-            ))
-        }
-    }
-
-}
-
-suspend fun ApplicationContext.interceptQuizAnswer(message: Chat) {
-    quizManager.send(CheckAnswer(
-            context = this,
-            peerId = message.peerId,
-            text = message.text,
-            messageId = message.messageId
-    ))
-}
-
+private val quizzes = ConcurrentHashMap<Int, Quiz>()
 private val questions = Thread.currentThread().contextClassLoader
         .getResourceAsStream("quiz.txt")
         .bufferedReader()
         .lineSequence()
         .toList()
 
-private fun makeQuiz(): Pair<String, String> {
-    val randomLine = (Math.random() * questions.lastIndex).toInt()
-    val line = questions[randomLine]
-    val (question, answer) = line.split('|')
-    return question to answer
+fun TypedMessageRoute<Chat>.quiz() {
+
+    onMessage("викторина") {
+
+        onMessage("стоп") {
+            intercept {
+                val peerId = it.message.peerId
+                val quiz = quizzes[peerId]
+                if (quiz == null || !quiz.isActive) {
+                    it.message.respondWithForward("В вашем чате не запущена викторина.")
+                } else {
+                    quiz.isActive = false
+                    if (quiz.alreadyAnswered) it.message.respondWithForward("Викторина остановлена.")
+                    else it.message.respondWithForward("Викторина остановлена. Ответа не будет.")
+                }
+            }
+        }
+
+        intercept {
+            val peerId = it.message.peerId
+            val quiz = quizzes[peerId]
+            if (quiz != null && quiz.isActive) {
+                val (question, answer, lettersOpenNum, alreadyAnswered) = quiz
+                if (alreadyAnswered) {
+                    val response = with(StringBuilder()) {
+                        append("В этом чате уже запущена викторина.\n")
+                        append("Подождите, скоро будет новый вопрос.")
+                    }
+
+                    it.message.respondWithForward(response)
+                } else {
+                    val hint = makeHint(answer, lettersOpenNum)
+                    val response = with(StringBuilder()) {
+                        append("В этом чате уже запущена викторина.\n")
+                        append("Текущий вопрос: $question\n")
+                        append("Текущая подсказка: $hint")
+                    }
+
+                    it.message.respondWithForward(response)
+                }
+            } else sendNewQuiz(peerId)
+        }
+
+    }
+
 }
 
-private fun makeHint(answer: String, hintCount: Int): String =
+private suspend fun ApplicationContext.sendNewQuiz(peerId: Int) {
+    val oldQuiz = quizzes[peerId]
+    if (oldQuiz != null && oldQuiz.isActive && !oldQuiz.alreadyAnswered) return
+
+    val newQuiz = makeQuiz()
+    val messageId = respond(peerId, newQuiz.question) ?: return
+
+    quizzes.put(peerId, newQuiz)
+    sendQuizHint(peerId, messageId, newQuiz)
+}
+
+private suspend fun ApplicationContext.sendQuizHint(peerId: Int, questionMessageId: Int, quiz: Quiz) {
+    val maxHint = 5
+    var currentHint = 0
+    while (currentHint < maxHint) {
+        delay(30, TimeUnit.SECONDS)
+        if (quiz.alreadyAnswered || !quiz.isActive) return
+
+        if (currentHint < maxHint - 1 && quiz.answer.lastIndex > currentHint) {
+            quiz.lettersOpenNum += 1
+            val hint = makeHint(quiz.answer, quiz.lettersOpenNum)
+            respond(peerId, "Подсказка: $hint", questionMessageId)
+        } else {
+            val response = with(StringBuilder()) {
+                append("Никто не дал правильного ответа.\n")
+                append("Правильный ответ: ${quiz.answer}")
+            }
+
+            respond(peerId, response, questionMessageId)
+            quiz.alreadyAnswered = true
+            break
+        }
+
+        currentHint++
+    }
+
+    delay(5, TimeUnit.SECONDS)
+    if (quiz.isActive) sendNewQuiz(peerId)
+}
+
+suspend fun ApplicationContext.interceptQuizAnswer(message: Chat) {
+    if (!quizzes.containsKey(message.peerId)) return
+
+    val quiz = quizzes[message.peerId] ?: return
+    if (quiz.isActive && !quiz.alreadyAnswered) {
+        if (message.text.startsWith(quiz.answer, true)) {
+            quiz.alreadyAnswered = true
+            message.respondWithForward("Поздравляю! Вы правы!")
+
+            delay(5, TimeUnit.SECONDS)
+            if (quiz.isActive) sendNewQuiz(message.peerId)
+        }
+    }
+}
+
+private fun makeQuiz(): Quiz {
+    val randomLine = (Math.random() * questions.lastIndex).toInt()
+    val line = questions[randomLine]
+
+    val (question, answer) = line.split('|')
+    return Quiz(question, answer.trim(), 0)
+}
+
+private fun makeHint(answer: String, lettersOpenNum: Int): String =
         answer.mapIndexed { i, c ->
             when {
-                i < hintCount -> c
+                i < lettersOpenNum -> c
                 c.isWhitespace() -> c
                 else -> '٭'
             }
