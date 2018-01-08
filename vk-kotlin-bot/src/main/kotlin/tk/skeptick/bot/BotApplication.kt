@@ -2,6 +2,7 @@ package tk.skeptick.bot
 
 import kotlinx.coroutines.experimental.channels.SendChannel
 import kotlinx.coroutines.experimental.channels.actor
+import kotlinx.coroutines.experimental.channels.sendBlocking
 
 class BotApplication(accessToken: String) : ApplicationContext(accessToken) {
 
@@ -22,7 +23,8 @@ class BotApplication(accessToken: String) : ApplicationContext(accessToken) {
         val peers = mutableMapOf<Int, SendChannel<MessageEvent>>()
         for (event in channel) {
             if (event is MessageEvent) {
-                peers[event.peerId]?.send(event) ?: peerChannel()
+                peers[event.peerId]?.send(event)
+                        ?: peerChannel()
                         .also { peers.put(event.peerId, it) }
                         .also { it.send(event) }
             }
@@ -30,7 +32,10 @@ class BotApplication(accessToken: String) : ApplicationContext(accessToken) {
     }
 
     private fun peerChannel(): SendChannel<MessageEvent> = actor {
-        for (event in channel) { handleMessageEvent(event) }
+        for (event in channel) {
+            try { handleMessageEvent(event) }
+            catch (e: Throwable) { log.error("Event handling error: ${e.printStackTrace()}") }
+        }
     }
 
     suspend private fun handleMessageEvent(event: MessageEvent) {
@@ -152,7 +157,7 @@ class BotApplication(accessToken: String) : ApplicationContext(accessToken) {
 
             EventParser.parse(responseString)
                     .also { log.info("Received ${it.size} events") }
-                    .onEach { eventAllocator.send(it) }
+                    .onEach { eventAllocator.sendBlocking(it) }
         }
     }
 

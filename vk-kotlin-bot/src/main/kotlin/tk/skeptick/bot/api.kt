@@ -2,14 +2,16 @@ package tk.skeptick.bot
 
 import com.github.kittinunf.fuel.core.FuelManager
 import com.github.kittinunf.fuel.core.Request
-import com.github.kittinunf.fuel.httpDownload
 import com.github.kittinunf.fuel.httpGet
 import com.github.kittinunf.fuel.httpPost
 import com.github.kittinunf.fuel.httpUpload
 import kotlinx.coroutines.experimental.delay
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.internal.IntSerializer
+import kotlinx.serialization.internal.ListLikeSerializer
 import kotlinx.serialization.list
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -23,6 +25,8 @@ private object Methods {
         const val getLongPollServer = it + "getLongPollServer"
         const val getLongPollHistory = it + "getLongPollHistory"
         const val getHistory = it + "getHistory"
+        const val removeChatUser = it + "removeChatUser"
+        const val addChatUser = it + "addChatUser"
     }
 
     object Photos {
@@ -35,6 +39,16 @@ private object Methods {
         private const val it = "friends."
         const val add = it + "add"
         const val getRequests = it + "getRequests"
+    }
+
+    object Wall {
+        private const val it = "wall."
+        const val search = it + "search"
+    }
+
+    object Utils {
+        private const val it = "utils."
+        const val resolveScreenName = it + "resolveScreenName"
     }
 
 }
@@ -159,6 +173,44 @@ class VkApi(private val context: ApplicationContext, accessToken: String) {
         )).execRequest(serializer)
     }
 
+    @Suppress("unused")
+    suspend fun wallSearch(ownerId: Int, offset: Int, text: String): ListResponse<WallPost>? {
+        val serializer = ListResponse.serializer(WallPost.serializer())
+        return Methods.Wall.search.httpGet(listOf(
+                "owner_id" to ownerId,
+                "query" to text,
+                "offset" to offset,
+                "count" to 100,
+                "extended" to 1
+        )).execRequest(serializer)
+    }
+
+    @Suppress("unused")
+    suspend fun resolveScreenName(screenName: String): ResolveScreenNameResponse? {
+        val serializer = ResolveScreenNameResponse.serializer()
+        return Methods.Utils.resolveScreenName.httpGet(listOf(
+                "screen_name" to screenName
+        )).execRequest(serializer)
+    }
+
+    @Suppress("unused")
+    suspend fun addChatUser(chatId: Int, userId: Int): Boolean {
+        val serializer = IntSerializer
+        return Methods.Messages.addChatUser.httpGet(listOf(
+                "chat_id" to chatId,
+                "user_id" to userId
+        )).execRequest(serializer) == 1 // may return "true" even if not added
+    }
+
+    @Suppress("unused")
+    suspend fun removeChatUser(chatId: Int, userId: Int): Boolean {
+        val serializer = IntSerializer
+        return Methods.Messages.removeChatUser.httpGet(listOf(
+                "chat_id" to chatId,
+                "user_id" to userId
+        )).execRequest(serializer) == 1
+    }
+
     suspend internal fun getLongPollServer(): LongPollServerResponse? {
         val serializer = LongPollServerResponse.serializer()
         return Methods.Messages.getLongPollServer.httpGet(listOf(
@@ -185,23 +237,32 @@ class VkApi(private val context: ApplicationContext, accessToken: String) {
     }
 
     suspend private fun <T> Request.execRequest(serializer: KSerializer<T>): T? {
-        val wrapperSerializer = ResponseWrapper.serializer(serializer)
         repeat(5) {
             context.log.debug("Starting request: ${path.substringBefore('?')}")
-            val (string, error) = responseString().third
-            when (string) {
-                null -> context.log.error("HTTP request error. Message: ${error!!.localizedMessage}")
-                else -> {
-                    val result = context.jsonParser.parse(wrapperSerializer, string)
-                    when {
-                        result.response != null -> return result.response
-                        result.error != null -> context.log.error("VK request error. " +
-                                "Code: ${result.error.errorCode}. " +
-                                "Message: ${result.error.errorMessage}")
-                    }
+            val (string, fuelError) = responseString().third
+            if (string == null)
+                context.log.error("HTTP request error. Message: ${fuelError!!.localizedMessage}")
+            else {
+                val jsonObject = JSONObject(string)
 
-                    return null
+                val optResponse = jsonObject.opt("response")
+                val response = if (optResponse != null && optResponse !is JSONArray)
+                    context.jsonParser.parse(serializer, optResponse.toString())
+                else if (optResponse is JSONArray && serializer is ListLikeSerializer<*, *, *>)
+                    context.jsonParser.parse(serializer, optResponse.toString())
+                else null
+
+                val error = jsonObject.optJSONObject("error")?.toString()
+                        ?.let { context.jsonParser.parse(Error.serializer(), it) }
+
+                if (error != null) with(StringBuilder()) {
+                    append("VK request error. ")
+                    append("Code: ${error.errorCode}. ")
+                    append("Message: ${error.errorMessage}")
+                    context.log.error(toString())
                 }
+
+                return response
             }
 
             context.log.info("Repeating request after 1 second")

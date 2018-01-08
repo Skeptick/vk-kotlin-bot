@@ -31,19 +31,15 @@ fun TypedMessageRoute<User>.addFriendUser() {
 
 private suspend fun ApplicationContext.addFriend(userId: Int): String? {
     val usersRequested = mutableListOf<Int>()
-
     while (true) {
         val requests = api.getFriendsRequests(offset = usersRequested.size)
-                ?.apply { usersRequested.addAll(this) }
-                ?: return null
+                ?.also { usersRequested.addAll(it) } ?: return null
 
         if (requests.size < 1000) break
     }
 
-    if (!usersRequested.contains(userId))
-        return "Сперва отправь мне запрос в друзья."
-
-    return api.addFriend(userId)?.let { "Заявка в друзья одобрена." }
+    return if (!usersRequested.contains(userId)) "Сперва отправь мне запрос в друзья."
+    else api.addFriend(userId)?.let { "Заявка в друзья одобрена." }
 }
 
 private fun retrieveUserId(restOfMessage: String, fromUserId: Int): Int {

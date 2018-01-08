@@ -1,134 +1,201 @@
 package routes
 
-import kotlinx.coroutines.experimental.delay
+import kotlinx.coroutines.experimental.*
+import kotlinx.coroutines.experimental.channels.SendChannel
+import kotlinx.coroutines.experimental.channels.actor
 import tk.skeptick.bot.ApplicationContext
 import tk.skeptick.bot.Chat
 import tk.skeptick.bot.TypedMessageRoute
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-private data class Quiz(
-        val question: String,
-        val answer: String,
-        var lettersOpenNum: Int,
-        var alreadyAnswered: Boolean = false,
-        var isActive: Boolean = true)
-
-private val quizzes = ConcurrentHashMap<Int, Quiz>()
-private val questions = Thread.currentThread().contextClassLoader
-        .getResourceAsStream("quiz.txt")
-        .bufferedReader()
-        .lineSequence()
-        .toList()
-
 fun TypedMessageRoute<Chat>.quiz() {
-
     onMessage("викторина") {
-
         onMessage("стоп") {
             intercept {
                 val peerId = it.message.peerId
-                val quiz = quizzes[peerId]
-                if (quiz == null || !quiz.isActive) {
-                    it.message.respondWithForward("В вашем чате не запущена викторина.")
-                } else {
-                    quiz.isActive = false
-                    if (quiz.alreadyAnswered) it.message.respondWithForward("Викторина остановлена.")
-                    else it.message.respondWithForward("Викторина остановлена. Ответа не будет.")
-                }
+                val messageId = it.message.messageId
+                quizAllocator.send(QuizEvent.Stop(this, peerId, messageId))
             }
         }
 
         intercept {
             val peerId = it.message.peerId
-            val quiz = quizzes[peerId]
-            if (quiz != null && quiz.isActive) {
-                val (question, answer, lettersOpenNum, alreadyAnswered) = quiz
-                if (alreadyAnswered) {
-                    val response = with(StringBuilder()) {
-                        append("В этом чате уже запущена викторина.\n")
-                        append("Подождите, скоро будет новый вопрос.")
-                    }
-
-                    it.message.respondWithForward(response)
-                } else {
-                    val hint = makeHint(answer, lettersOpenNum)
-                    val response = with(StringBuilder()) {
-                        append("В этом чате уже запущена викторина.\n")
-                        append("Текущий вопрос: $question\n")
-                        append("Текущая подсказка: $hint")
-                    }
-
-                    it.message.respondWithForward(response)
-                }
-            } else sendNewQuiz(peerId)
+            val messageId = it.message.messageId
+            quizAllocator.send(QuizEvent.Start(this, peerId, messageId))
         }
-
     }
-
-}
-
-private suspend fun ApplicationContext.sendNewQuiz(peerId: Int) {
-    val oldQuiz = quizzes[peerId]
-    if (oldQuiz != null && oldQuiz.isActive && !oldQuiz.alreadyAnswered) return
-
-    val newQuiz = makeQuiz()
-    val messageId = respond(peerId, newQuiz.question) ?: return
-
-    quizzes.put(peerId, newQuiz)
-    sendQuizHint(peerId, messageId, newQuiz)
-}
-
-private suspend fun ApplicationContext.sendQuizHint(peerId: Int, questionMessageId: Int, quiz: Quiz) {
-    val maxHint = 5
-    var currentHint = 0
-    while (currentHint < maxHint) {
-        delay(30, TimeUnit.SECONDS)
-        if (quiz.alreadyAnswered || !quiz.isActive) return
-
-        if (currentHint < maxHint - 1 && quiz.answer.lastIndex > currentHint) {
-            quiz.lettersOpenNum += 1
-            val hint = makeHint(quiz.answer, quiz.lettersOpenNum)
-            respond(peerId, "Подсказка: $hint", questionMessageId)
-        } else {
-            val response = with(StringBuilder()) {
-                append("Никто не дал правильного ответа.\n")
-                append("Правильный ответ: ${quiz.answer}")
-            }
-
-            respond(peerId, response, questionMessageId)
-            quiz.alreadyAnswered = true
-            break
-        }
-
-        currentHint++
-    }
-
-    delay(5, TimeUnit.SECONDS)
-    if (quiz.isActive) sendNewQuiz(peerId)
 }
 
 suspend fun ApplicationContext.interceptQuizAnswer(message: Chat) {
-    if (!quizzes.containsKey(message.peerId)) return
+    val peerId = message.peerId
+    val messageId = message.messageId
+    val text = message.text
+    quizAllocator.send(QuizEvent.Answer(this, peerId, messageId, text))
+}
 
-    val quiz = quizzes[message.peerId] ?: return
-    if (quiz.isActive && !quiz.alreadyAnswered) {
-        if (message.text.startsWith(quiz.answer, true)) {
-            quiz.alreadyAnswered = true
-            message.respondWithForward("Поздравляю! Вы правы!")
+private typealias Context = ApplicationContext
+private sealed class QuizEvent(val context: Context, val peerId: Int) {
+    class Start(context: Context, peerId: Int, val messageId: Int) : QuizEvent(context, peerId)
+    class Stop(context: Context, peerId: Int, val messageId: Int) : QuizEvent(context, peerId)
+    class HintTime(context: Context, peerId: Int) : QuizEvent(context, peerId)
+    class ContinueTime(context: Context, peerId: Int) : QuizEvent(context, peerId)
+    class Answer(context: Context, peerId: Int, val messageId: Int, val text: String) : QuizEvent(context, peerId)
+}
 
-            delay(5, TimeUnit.SECONDS)
-            if (quiz.isActive) sendNewQuiz(message.peerId)
+private val questions by lazy {
+    Thread.currentThread()
+            .contextClassLoader
+            .getResourceAsStream("quiz.txt")
+            .bufferedReader()
+            .lineSequence()
+            .toList()
+}
+
+private val quizAllocator: SendChannel<QuizEvent> = actor {
+    val quizzes = mutableMapOf<Int, SendChannel<QuizEvent>>()
+    for (event in channel) {
+        quizzes[event.peerId]?.send(event)
+                ?: quizChannel()
+                .also { quizzes.put(event.peerId, it) }
+                .also { it.send(event) }
+    }
+}
+
+private fun quizChannel(): SendChannel<QuizEvent> = actor {
+    var question = ""
+    var answer = ""
+    var lettersOpenNum = 0
+    var questionMessageId = 0
+    var isRunning = false
+    var isAnswered = false
+    var waitHintJob: Job? = null
+    var waitContinueJob: Job? = null
+
+    fun startQuiz() {
+        makeQuiz().also { question = it.first; answer = it.second }
+        isRunning = true
+        isAnswered = false
+        lettersOpenNum = 0
+    }
+
+    fun stopQuiz() = runBlocking {
+        isRunning = false
+        isAnswered = false
+        waitHintJob?.cancelAndJoin()
+        waitContinueJob?.cancelAndJoin()
+    }
+
+    for (event in channel) {
+        when (event) {
+
+            is QuizEvent.Start -> when {
+                isRunning && isAnswered ->
+                    event.sendAlreadyRunningOnPause()
+                isRunning ->
+                    makeHint(answer, lettersOpenNum)
+                            .also { event.sendAlreadyRunning(question, it) }
+                else ->
+                    startQuiz().let { event.sendNewQuestion(question) }
+                            ?.also { questionMessageId = it }
+                            ?.also { waitHintJob = waitHint(event.context, event.peerId) }
+                            ?: stopQuiz()
+            }
+
+            is QuizEvent.Stop -> when {
+                isRunning && isAnswered ->
+                    stopQuiz().also { event.sendQuizStoppedOnPause() }
+                isRunning ->
+                    stopQuiz().also { event.sendQuizStopped() }
+                else ->
+                    event.sendQuizNotRunning()
+            }
+
+            is QuizEvent.HintTime -> when {
+                isRunning && !isAnswered && lettersOpenNum++ < 5 && answer.length > 5 ->
+                    event.sendHint(questionMessageId, makeHint(answer, lettersOpenNum))
+                            .also { waitHintJob = waitHint(event.context, event.peerId) }
+                isRunning && !isAnswered ->
+                    event.sendNoOneAnswered(questionMessageId, answer)
+                            .also { isAnswered = true }
+                            .also { waitContinueJob = waitContinue(event.context, event.peerId) }
+            }
+
+            is QuizEvent.ContinueTime -> when {
+                isRunning ->
+                    startQuiz().let { event.sendNewQuestion(question) }
+                            ?.also { questionMessageId = it }
+                            ?.also { waitHintJob = waitHint(event.context, event.peerId) }
+                            ?: stopQuiz()
+            }
+
+            is QuizEvent.Answer -> when {
+                isRunning && !isAnswered && event.text.startsWith(answer, true) ->
+                    event.sendCongratulation()
+                            ?.also { isAnswered = true }
+                            ?.also { waitContinueJob = waitContinue(event.context, event.peerId) }
+            }
         }
     }
 }
 
-private fun makeQuiz(): Quiz {
-    val randomLine = (Math.random() * questions.lastIndex).toInt()
-    val line = questions[randomLine]
+private suspend fun waitHint(context: Context, peerId: Int) = launch {
+    delay(30, TimeUnit.SECONDS)
+    quizAllocator.send(QuizEvent.HintTime(context, peerId))
+}
 
-    val (question, answer) = line.split('|')
-    return Quiz(question, answer.trim(), 0)
+private suspend fun waitContinue(context: Context, peerId: Int) = launch {
+    delay(5, TimeUnit.SECONDS)
+    quizAllocator.send(QuizEvent.ContinueTime(context, peerId))
+}
+
+private suspend fun QuizEvent.Start.sendAlreadyRunning(question: String, hint: String) =
+        with(StringBuilder()) {
+            append("В этом чате уже запущена викторина.\n")
+            append("Текущий вопрос: $question\n")
+            append("Текущая подсказка: $hint")
+            context.respond(peerId, this, messageId)
+        }
+
+private suspend fun QuizEvent.Start.sendAlreadyRunningOnPause() =
+        with(StringBuilder()) {
+            append("В этом чате уже запущена викторина.\n")
+            append("Подождите, скоро будет новый вопрос.")
+            context.respond(peerId, this, messageId)
+        }
+
+private suspend fun QuizEvent.Start.sendNewQuestion(question: String) =
+        context.respond(peerId, question)
+
+private suspend fun QuizEvent.Stop.sendQuizNotRunning() =
+        context.respond(peerId, "В вашем чате не запущена викторина.", messageId)
+
+private suspend fun QuizEvent.Stop.sendQuizStopped() =
+        context.respond(peerId, "Викторина остановлена. Ответа не будет.", messageId)
+
+private suspend fun QuizEvent.Stop.sendQuizStoppedOnPause() =
+        context.respond(peerId, "Викторина остановлена.", messageId)
+
+private suspend fun QuizEvent.HintTime.sendHint(questionMessageId: Int, hint: String) =
+        context.respond(peerId, "Подсказка: $hint", questionMessageId)
+
+private suspend fun QuizEvent.ContinueTime.sendNewQuestion(question: String) =
+        context.respond(peerId, question)
+
+private suspend fun QuizEvent.HintTime.sendNoOneAnswered(questionMessageId: Int, answer: String) =
+        with(StringBuilder()) {
+            append("Никто не дал правильного ответа.\n")
+            append("Правильный ответ: $answer")
+            context.respond(peerId, this, questionMessageId)
+        }
+
+private suspend fun QuizEvent.Answer.sendCongratulation() =
+        context.respond(peerId, "Поздравляю! Вы правы!", messageId)
+
+
+private fun makeQuiz(): Pair<String, String> { // <Question, Answer>
+    val randomLine = (Math.random() * questions.lastIndex).toInt()
+    val (question, answer) = questions[randomLine].split('|')
+    return question to answer
 }
 
 private fun makeHint(answer: String, lettersOpenNum: Int): String =

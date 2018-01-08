@@ -19,7 +19,7 @@ fun main(args: Array<String>) = runBlocking {
 
     val bot = BotApplication(appProperties.getProperty("accessToken"))
     bot.anyMessage { chat() }
-    bot.onPtsUpdated { savePts(it) }
+    bot.onPtsUpdated { Settings.savePts(it) }
     bot.onHistoryLoaded(Settings.getPts()) {
         it.filter { !it.isServiceAct && it.isFromChat }
                 .let { saveMessagesHistory(it) }
@@ -45,17 +45,6 @@ private fun DefaultMessageRoute.chat() {
         onIncomingMessage {
             addFriendUser()
         }
-    }
-}
-
-/* Сохраняем каждый пятидесятый PTS,
- чтоб не тревожить БД попусту */
-private var ptsCounter = -1
-private fun savePts(pts: Long) {
-    if (ptsCounter++ == -1) Settings.savePts(pts)
-    else if (ptsCounter == 50) {
-        Settings.savePts(pts)
-        ptsCounter = 0
     }
 }
 

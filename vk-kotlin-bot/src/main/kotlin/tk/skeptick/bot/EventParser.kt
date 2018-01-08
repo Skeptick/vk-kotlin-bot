@@ -94,7 +94,7 @@ internal object EventParser {
     fun parse(json: String): List<Event> {
         return JSONObject(json)
                 .getJSONArray("updates")
-                .map(::JSONArray)
+                .map { it as JSONArray }
                 .mapNotNull(EventParser::parseEvent)
     }
 

@@ -54,11 +54,6 @@ enum class WallPostTypes(val type: String) {
 }
 
 @Serializable
-internal data class ResponseWrapper<out T>(
-        @Optional @SerialName("error") val error: Error? = null,
-        @Optional @SerialName("response") val response: T? = null)
-
-@Serializable
 internal data class Error(
         @SerialName("error_code") val errorCode: Int,
         @SerialName("error_msg") val errorMessage: String)
@@ -289,11 +284,11 @@ data class WallPost internal constructor(
         @SerialName("from_id") val fromId: Int,
         @SerialName("date") val date: Int,
         @SerialName("text") val text: String,
-        @SerialName("comments") val comments: WallPostComments,
         @SerialName("likes") val likes: WallPostLikes,
         @SerialName("reposts") val reposts: WallPostReposts,
         @SerialName("post_type") private val type: String,
         // TODO attachments
+        @Optional @SerialName("comments") val comments: WallPostComments? = null,
         @Optional @SerialName("views") val views: WallPostViews? = null,
         @Optional @SerialName("reply_owner_id") val replyOwnerId: Int? = null,
         @Optional @SerialName("reply_post_id") val replyPostId: Int? = null,
@@ -355,7 +350,8 @@ data class WallPostViews internal constructor(
 @Serializable
 data class ListResponse<out T> internal constructor(
         @SerialName("count") val count: Int,
-        @SerialName("items") val items: List<T>)
+        @SerialName("items") val items: List<T>,
+        @Optional @SerialName("profiles") val profiles: List<UserProfile>? = null)
 
 @Serializable
 data class UserProfile internal constructor(
@@ -393,3 +389,8 @@ data class PhotoUploadResponse internal constructor(
         @SerialName("server") val server: Int,
         @SerialName("photo") val photo: String,
         @SerialName("hash") val hash: String)
+
+@Serializable
+data class ResolveScreenNameResponse internal constructor(
+        @SerialName("type") val type: String,
+        @SerialName("object_id") val objectId: Int)
